@@ -1,0 +1,397 @@
+---
+title: "Final report 3250"
+author: "Elvis Zhixiang Yang 30306396"
+date: "5/23/2021"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,include=FALSE,warning=FALSE}
+# Example analysis
+library(tidyverse)
+library(tidymodels)
+library(randomForest)
+
+# Read data
+fires_tr_full <- read_csv("student_training_release.csv") %>%
+  mutate(cause = factor(cause))
+fires_to_predict <- read_csv("student_predict_x_release.csv")
+
+# Split into training test sets for model building
+set.seed(7000)
+split <- initial_split(fires_tr_full, 3/4, strata = "cause")
+fires_tr <- training(split)
+fires_ts <- testing(split)
+
+
+
+
+
+
+training<-fires_tr #!!!!!!!!! used as no log model
+
+
+
+training <- filter(training, month %in% c(10,11,12,1,2,3))
+
+
+
+
+
+
+training <- select(training, -FOREST, -year, -FOR_TYPE,-FOR_CODE, -FOR_CAT, -wod)
+
+fires_ts<-select(fires_ts,-FOREST, -year, -FOR_TYPE,,-FOR_CODE, -FOR_CAT, -wod)
+
+training<- na.omit(training)
+
+
+
+library(outliers)
+
+
+training$lon<-rm.outlier(training$lon, fill = TRUE, median =TRUE, opposite = FALSE)
+
+training$lat<-rm.outlier(training$lat, fill = TRUE, median =TRUE, opposite = FALSE)
+
+training$dist_cfa<-rm.outlier(training$dist_cfa, fill = TRUE, median =TRUE, opposite = FALSE)
+training$dist_camp<-rm.outlier(training$dist_camp, fill = TRUE, median =TRUE, opposite = FALSE)
+training$dist_road<-rm.outlier(training$dist_road, fill =TRUE, median =TRUE, opposite = FALSE)
+
+
+
+training$aws_m24<-rm.outlier(training$aws_m24, fill = TRUE, median =TRUE, opposite = FALSE)
+training$aws_m12<-rm.outlier(training$aws_m12, fill = TRUE, median =TRUE, opposite = FALSE)
+
+training$ase180<-rm.outlier(training$ase180, fill = TRUE, median =TRUE, opposite = FALSE)
+
+training$ase90<-rm.outlier(training$ase90, fill = TRUE, median =TRUE, opposite = FALSE)
+
+
+training$arf360<-rm.outlier(training$arf360, fill = TRUE, median =TRUE, opposite = FALSE)
+
+
+
+
+
+# Fit a basic model
+fires_rf <- rand_forest() %>%
+  set_engine("randomForest",
+             importance=TRUE, proximity=TRUE) %>%
+  set_mode("classification") %>%
+  fit(cause~dist_camp+dist_road+dist_cfa+lon+ase180+lat+aws_m24+aws_m12+arf360+ase90+month, data=training)
+
+
+fires_rf
+
+summary(fires_rf)
+
+
+library(outliers)
+
+
+fires_to_predict$lon<-rm.outlier(fires_to_predict$lon, fill = TRUE, median =TRUE, opposite = FALSE)
+
+fires_to_predict$lat<-rm.outlier(fires_to_predict$lat, fill = TRUE, median =TRUE, opposite = FALSE)
+
+fires_to_predict$dist_cfa<-rm.outlier(fires_to_predict$dist_cfa, fill = TRUE, median =TRUE, opposite = FALSE)
+fires_to_predict$dist_camp<-rm.outlier(fires_to_predict$dist_camp, fill = TRUE, median =TRUE, opposite = FALSE)
+fires_to_predict$dist_road<-rm.outlier(fires_to_predict$dist_road, fill = TRUE, median =TRUE, opposite = FALSE)
+
+
+
+fires_to_predict$aws_m24<-rm.outlier(fires_to_predict$aws_m24, fill = TRUE, median =TRUE, opposite = FALSE)
+fires_to_predict$aws_m12<-rm.outlier(fires_to_predict$aws_m12, fill = TRUE, median =TRUE, opposite = FALSE)
+
+fires_to_predict$ase180<-rm.outlier(fires_to_predict$ase180, fill = TRUE, median =TRUE, opposite = FALSE)
+
+fires_to_predict$ase90<-rm.outlier(fires_to_predict$ase90, fill = TRUE, median =TRUE, opposite = FALSE)
+
+
+fires_to_predict$arf360<-rm.outlier(fires_to_predict$arf360, fill = TRUE, median =TRUE, opposite = FALSE)
+
+
+# Make predictions
+fires_to_predict_p <- fires_to_predict %>%
+  mutate(cause_p = predict(fires_rf, fires_to_predict)$.pred_class) %>%
+  select(id, cause_p) %>%
+  rename(Id = id, Category = cause_p)
+write_csv(fires_to_predict_p, file="predictions_2021-05-1900.csv")
+
+
+
+```
+
+
+
+
+## Data implementation changes 
+From following plots, We can get bushfires are more likely to start around the summer times of Victoria(In months 10,11,12,1,2,3).Here,to reduce the bias of data and fit the prediction dataset, we should only filter the significant months from dataset which are months 10,11,12,1,2,3.Meanwhile,among all 4 causes the lightning and Accident are most likely to happen. 
+We use `outlier` package to replace the extreme value inside columns of the dataset of their column median, which reduce extreme values and bias. However, after we filter the extreme values, the Kaggle score is decreased while public increased. That means the data is overfitted or omitted so we couldn't remove outliers. 
+\begin{center}
+  \begin{tabular}{||c|c|c||}
+  \hline
+  Modeling method & Random forest & XGboost\\
+  \hline\hline
+  Before rm.outlier  & 0.84663 & 0.80412\\
+  \hline
+  After rm.outlier & 0.85398 & 0.73969\\
+  \hline
+\end{tabular}
+\end{center}
+Another issue is Categorical variables, the option in dummy variables don't have standardized interval scale, which respondents are not able to effectively gauge their options before responding(Blog, 2021). Thus,to avoid the interference when selecting significant variables in modeling, we here remove the  categorical variable FOR_TYPE, FOR_CAT etc. 
+**plot1**
+```{r,echo=FALSE}
+
+ggplot(data=fires_tr)+geom_bar(aes(month,fill=month),stat ="count",color="Gold")+ theme_minimal(base_size = 10) + ggtitle("Ignition by months 12")->p10
+
+```
+
+**PlotA**, *histogram of bushfires cause and happend within one year*
+
+```{r plotA,echo=FALSE,warning=FALSE}
+  training %>%
+  mutate(cause = factor(tools::toTitleCase(as.character(cause)), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
+    ggplot() +
+     geom_histogram(aes(cause, fill = cause), stat = "count") +
+    theme_minimal(base_size = 10) +
+    ggtitle("Different causes of the bushfires") +
+    scale_fill_brewer(palette = "Spectral") +
+    xlab("Cause") +
+    ylab("Count")->p11
+  
+```
+
+```{r,echo=FALSE}
+library(ggplot2)
+library(ggpubr)
+  
+
+figure1<-ggarrange(p11,p10,ncol=2,nrow=1)
+figure1
+
+```
+# Model selection 
+RF model is used to predict causes for Random Forest is a practical way and regularly used in machine learning models. Random Forest Model have the variable selecting system (via boostraping) to decide the most significant tree and can reduce overfitting compared with decision tree.With that said, random forests are a strong modeling technique and much more robust comparing with many different methods. (Liberman, 2017) The model has a OOB of 26.29%, which reflects it's a good model to estimate. 
+
+We then tested the XGBoost, it solves complex questions via building parallel computing for different trees. It can solve the classification and complex questions efficiently. However, after testing the XGBoost, we only got 0.74. Such bias may caused by overfitting, we cannot use XGBoost. 
+
+
+\begin{center}
+  \begin{tabular}{||c|c|c||}
+  \hline
+  Modeling &  fstvarkag & scndvarkag\\
+  \hline\hline
+  Random Forest & 0.85398 & 0.84663\\
+  \hline
+  XGBoost & 0.74690 & 0.75618\\
+  \hline
+\end{tabular}
+\end{center}
+
+# Classification of the variables + Explaintory Data Analysis 
+### Why Month ? 
+The data is Yearly, months are make more sense to track changes than a day(*observation dataset is large which may occur more bias*) and year(*observation dataset too small couldn't reflect the overall trend*). 
+### Why average wind speed(aws)? 
+As we can conclude from following density plot, the bushfires are also positively correlated with the yearly wind speed. Based on plot and general rule we can say that the slower wind speed is, the less chance of getting fire lit and spread out. 
+```{r,echo=FALSE}
+  
+training<-mutate(training,aws_m12=aws_m12)
+
+  training %>%
+  mutate(cause = factor(stringr::str_to_title(as.character(cause)), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
+    gather(key = "metric", value = "windspeed", aws_m12) %>%
+    mutate(metric = ifelse(metric == "aws_m12",  "average near surface wind 12months")) %>%
+    ggplot() +
+    geom_density(aes(windspeed, col = cause), size = 1.0) +
+    theme_minimal(base_size = 9) +
+    theme(legend.position = "bottom") +
+    xlab("average wind speed") +
+    scale_color_brewer(palette = "Spectral") +
+    facet_wrap(~metric, scales = "free_x") ->p3
+
+
+  
+  
+  
+    
+training<-mutate(training,aws_m24=aws_m24)
+
+  training %>%
+  mutate(cause = factor(stringr::str_to_title(as.character(cause)), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
+    gather(key = "metric", value = "windspeed", aws_m24) %>%
+    mutate(metric = ifelse(metric == "aws_m24",  "average near surface wind 24months")) %>%
+    ggplot() +
+    geom_density(aes(windspeed, col = cause), size = 1.0) +
+    theme_minimal(base_size = 9) +
+    theme(legend.position = "bottom") +
+    xlab("average wind speed") +
+    scale_color_brewer(palette = "Spectral") +
+    facet_wrap(~metric, scales = "free_x") ->p4
+
+  
+library(ggplot2)
+library(ggpubr)
+  
+
+figure1<-ggarrange(p3,p4,ncol=2,nrow=1)
+figure1
+
+```
+
+### Why distances(dist_road,cfa,camp)??
+Also from the plot, there is a relationship between the fire ignition with distances to CFA, CAMP, ROAD. In summer times, the accident caused ignitions were close to camp, which means camp was a source of the bushfires. Moreover, we can also conclude that the closer to the road,more chance to get fired of accident. Also, different causes are showed different performance of the distance to CFA station and road. Such a reason maybe just because it's correlated with people's activities and density.
+
+*The distance density plot of the camp (After transformed the dist_road,dist_cfa,dist_camp)*
+
+```{r,echo=FALSE,warning=FALSE}
+
+training<-mutate(training,dist_road=log(dist_road))
+
+  training %>%
+  mutate(cause = factor(stringr::str_to_title(as.character(cause)), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
+    gather(key = "metric", value = "distance", dist_road) %>%
+    mutate(metric = ifelse(metric == "dist_road", " distance to the nearest road")) %>%
+    ggplot() +
+    geom_density(aes(distance, col = cause), size = 1.0) +
+    theme_minimal(base_size = 8) +
+    theme(legend.position = "bottom") +
+    xlab("Distance") +
+    scale_color_brewer(palette = "Spectral") +
+    facet_wrap(~metric, scales = "free_x")->p1
+
+  
+  
+  
+training<-mutate(training,dist_cfa=log(dist_cfa))
+
+  training %>%
+  mutate(cause = factor(stringr::str_to_title(as.character(cause)), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
+    gather(key = "metric", value = "distance", dist_cfa) %>%
+    mutate(metric = ifelse(metric == "dist_cfa",  "distance to the nearest cfa")) %>%
+    ggplot() +
+    geom_density(aes(distance, col = cause), size = 1.5) +
+    theme_minimal(base_size = 8) +
+    theme(legend.position = "bottom") +
+    xlab("Distance") +
+    scale_color_brewer(palette = "Spectral") +
+    facet_wrap(~metric, scales = "free_x") ->p2
+
+
+training<-mutate(training,dist_camp=log(dist_camp))
+
+  training %>%
+  mutate(cause = factor(stringr::str_to_title(as.character(cause)), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
+    gather(key = "metric", value = "distance", dist_camp) %>%
+    mutate(metric = ifelse(metric == "dist_camp", " distance to the nearest camp")) %>%
+    ggplot() +
+    geom_density(aes(distance, col = cause), size = 1.0) +
+    theme_minimal(base_size = 8) +
+    theme(legend.position = "bottom") +
+    xlab("Distance") +
+    scale_color_brewer(palette = "Spectral") +
+    facet_wrap(~metric, scales = "free_x")->p9
+  
+
+
+  
+library(ggplot2)
+library(ggpubr)
+  
+
+figure1<-ggarrange(p9,p2,ncol=2,nrow=1)
+figure1
+
+
+```
+
+### Why ase and arf?? 
+Moreover, based on the general role, we also found the Average solar exposure(ase) and Average Rainfall(arf) also did a great influence on the lighting. By observing the cause by ase and arf of **graph 1 **. The exposure of solar is positively correlated with bushfires caused by lighting and Burning_off, while the rainfall is correlated with bushfires caused by lighting and burning_off. So we should choose these 2 classes as a reference because they are important when predicting these 2 causes(*majority among all 4 causes*). 
+```{r,include=FALSE}
+
+
+library(caret)#creatDataPartition 
+library(lime)#explanation 
+
+
+  
+inTraining <- createDataPartition(training$cause, p = .75, list=FALSE)[,1] 
+train_set <- training[inTraining,]
+test_set  <- training[-inTraining,]
+
+
+
+
+
+  
+set.seed(3000)
+  
+lime_sample <- sample(1:length(test_set$cause), 4)
+ 
+library(lime)
+  
+explainer <- lime(train_set, fires_rf,bin_continuous = FALSE)
+
+
+  
+explaination <- explain(test_set[lime_sample, ],explainer,n_labels = 4,n_features = 5) 
+
+  
+p <- plot_explanations(filter(explaination))
+
+
+
+
+
+```
+
+*In this graph, variable has a positive weight means it has a positive impact on the probability,vice versa . The magnitude shows the impact strength, which is the variable influence on a local point of view.*
+```{r,echo=FALSE,warning=FALSE}
+
+
+
+
+explaination %>%
+mutate(label = factor(stringr::str_to_title(label), levels = c("Lightning", "Accident", "Arson", "Burning_off"))) %>%
+ggplot() +
+  geom_boxplot(aes(feature_weight, feature), outlier.size = 0.5) +
+  geom_vline(xintercept = 0, col = "Green") +
+  ylab("feature") +
+  facet_wrap(~label, ncol = 2,nrow=2) +
+  xlab("Weight") +
+  ylab("Variables")
+    
+
+
+```
+
+After the explanatory analysis,we already sort classes out, which are lon,lat,aws,arf,ase.By observing the data.
+Based on the mean decrease accuracy selection criteria performance on Kaggle, we found that if we use the global variable importance(MDA) in the model random forest is likely to be misleading and biased. So here we use Lime to get variable importance under the local aspects.Then after generating a new model, we'll test them on kaggle and compare their scores between different models. By repeating such a process, we sort out the significant variables. 
+
+# Reference List 
+Liberman, N. (2017). Decision Trees and Random Forests. Retrieved 23 May 2021, from https://towardsdatascience.com/decision-trees-and-random-forests-df0c3123f991 (Liberman, 2017)
+
+
+Blog, F. (2021). Categorical Data: Definition + [Examples, Variables & Analysis]. Retrieved 23 May 2021, from https://www.formpl.us/blog/categorical-data
+
+
+
+
+```{r}
+citation("outliers")
+citation("lime")
+  
+citation("ggplot2")
+citation("ggpubr")
+  
+
+```
+
+
+
